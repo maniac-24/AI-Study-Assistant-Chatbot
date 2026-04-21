@@ -32,9 +32,9 @@ streamlit run app.py
 
 ## 📸 Demo
 
-![App Screenshot](screenshot1.png)
-![App Screenshot](screenshot2.png)
-![App Screenshot](screenshot3.png)
+![App Screenshot](images/screenshot1.png)
+![App Screenshot](images/screenshot2.png)
+![App Screenshot](images/screenshot3.png)
 
 ---
 
