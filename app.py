@@ -1,66 +1,155 @@
 import streamlit as st
 import time
+import random
+import re
 
-# Configure page settings
+# ---------------- CONFIG ---------------- #
 st.set_page_config(page_title="AI Study Assistant", page_icon="🤖")
 
-st.title("🤖 AI Study Assistant")
-st.markdown("Your minimal, modern study companion for Python, DSA, OS, and DBMS.")
+# ---------------- CUSTOM CSS ---------------- #
+st.markdown("""
+<style>
 
-# Add Clear Chat Button at top (sidebar)
+/* User message (right side bubble) */
+.user-msg {
+    text-align: right;
+    background-color: #262730;
+    padding: 10px;
+    border-radius: 12px;
+    margin: 8px 0;
+    max-width: 60%;
+    margin-left: auto;
+}
+
+/* Assistant message (FULL WIDTH) */
+.assistant-msg {
+    text-align: left;
+    background-color: #1c1f26;
+    padding: 14px;
+    border-radius: 12px;
+    margin: 8px auto;
+    width: 100%;
+    max-width: 900px;
+}
+
+/* Remove extra spacing */
+.block-container {
+    padding-top: 2rem;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------- TITLE ---------------- #
+st.title("🤖 AI Study Assistant")
+st.markdown("🚀 Your smart AI companion for mastering Python, DSA, OS, and DBMS.")
+
+# ---------------- CLEAR CHAT ---------------- #
 if st.sidebar.button("🗑 Clear Chat"):
     st.session_state.messages = []
     st.rerun()
 
-# Initialize chat history
+# ---------------- SESSION ---------------- #
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display chat messages from history on app rerun
+# ---------------- DISPLAY CHAT ---------------- #
 for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+    if message["role"] == "user":
+        st.markdown(
+            f"<div class='user-msg'>{message['content']}</div>",
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown(
+            f"<div class='assistant-msg'>{message['content']}</div>",
+            unsafe_allow_html=True
+        )
 
-# React to user input using st.chat_input
+# ---------------- USER INPUT ---------------- #
 if prompt := st.chat_input("Ask me anything..."):
     if prompt.strip() != "":
-        # Display user message in chat bubble
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        # Add user message to chat history
+
+        # Show user message
+        st.markdown(
+            f"<div class='user-msg'>{prompt}</div>",
+            unsafe_allow_html=True
+        )
+
         st.session_state.messages.append({"role": "user", "content": prompt})
 
-        # Simple logic based on dictionary (cleaner + scalable)
         prompt_lower = prompt.lower()
-        
+
+        # ---------------- SMART KNOWLEDGE ---------------- #
         knowledge = {
-            "python": "Python is a versatile programming language used for AI, web development, data science, and more.",
-            "dsa": "DSA stands for Data Structures and Algorithms. Essential for problem solving.",
-            "os": "Operating System manages hardware and software resources.",
-            "dbms": "DBMS is used to store and manage databases efficiently."
+            "python": [
+                "Python is a powerful language used in AI, web development, and automation.",
+                "Python is beginner-friendly and widely used in data science.",
+                "Python supports multiple programming paradigms like OOP and functional programming."
+            ],
+            "dsa": [
+                "DSA stands for Data Structures and Algorithms, essential for coding interviews.",
+                "DSA helps in writing efficient and optimized programs.",
+                "Learning DSA improves problem-solving skills."
+            ],
+            "os": [
+                "Operating System manages hardware and software resources.",
+                "OS acts as an interface between user and computer hardware.",
+                "Examples include Windows, Linux, and macOS."
+            ],
+            "dbms": [
+                "DBMS is used to store and manage data efficiently.",
+                "It allows users to create, read, update, and delete data.",
+                "Examples include MySQL, PostgreSQL, and MongoDB."
+            ]
         }
 
-        reply = "I'm your AI Study Assistant 🤖. Ask me about Python, DSA, OS, or DBMS!"
+        # Default replies
+        default_replies = [
+            "I'm your AI Study Assistant. Ask me about Python, DSA, OS, or DBMS.",
+            "Try asking about programming topics like Python or DSA.",
+            "I can help you learn core CS subjects. What would you like to know?"
+        ]
 
-        for key, value in knowledge.items():
-            if key in prompt_lower:
-                reply = value
+        reply = random.choice(default_replies)
+
+        # Match topic
+        matched = False
+        clean_prompt = re.sub(r'[^\w\s]', '', prompt_lower)
+
+        for key, responses in knowledge.items():
+            if re.search(rf"\b{key}\b", clean_prompt):
+                reply = random.choice(responses)
+                matched = True
                 break
 
-        # Display assistant response in chat bubble with typing effect
-        with st.spinner("Assistant is thinking... 🤔"):
-            time.sleep(0.5)
-            
-        with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-            full_text = ""
-            
-            for word in reply.split():
-                full_text += word + " "
-                message_placeholder.markdown(full_text + "▌")
-                time.sleep(0.05)  # Added slight delay for a realistic typing effect
-            
-            message_placeholder.markdown(full_text)
-            
-        # Add assistant response to chat history
+        # Extra smart keywords
+        if not matched:
+            if any(re.search(rf"\b{word}\b", clean_prompt) for word in ["algorithm", "algorithms", "structure", "structures"]):
+                reply = random.choice(knowledge["dsa"])
+            elif any(re.search(rf"\b{word}\b", clean_prompt) for word in ["database", "sql", "table", "tables"]):
+                reply = random.choice(knowledge["dbms"])
+            elif any(re.search(rf"\b{word}\b", clean_prompt) for word in ["linux", "windows", "kernel"]):
+                reply = random.choice(knowledge["os"])
+
+        # ---------------- TYPING EFFECT ---------------- #
+        with st.spinner("Thinking..."):
+            time.sleep(0.3)
+
+        message_placeholder = st.empty()
+        full_text = ""
+
+        for word in reply.split():
+            full_text += word + " "
+            message_placeholder.markdown(
+                f"<div class='assistant-msg'>{full_text}▌</div>",
+                unsafe_allow_html=True
+            )
+            time.sleep(0.04)
+
+        message_placeholder.markdown(
+            f"<div class='assistant-msg'>{full_text}</div>",
+            unsafe_allow_html=True
+        )
+
         st.session_state.messages.append({"role": "assistant", "content": reply})
