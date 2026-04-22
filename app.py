@@ -2,6 +2,10 @@ import streamlit as st
 import time
 import random
 import re
+from datetime import datetime
+
+def get_time():
+    return datetime.now().strftime("%H:%M")
 
 # ---------------- CONFIG ---------------- #
 st.set_page_config(page_title="AI Study Assistant", page_icon="🤖")
@@ -57,12 +61,12 @@ if "messages" not in st.session_state:
 for message in st.session_state.messages:
     if message["role"] == "user":
         st.markdown(
-            f"<div class='user-msg'>{message['content']}</div>",
+            f"<div class='user-msg'>{message['content']}<br><small>{message.get('time','')}</small></div>",
             unsafe_allow_html=True
         )
     else:
         st.markdown(
-            f"<div class='assistant-msg'>{message['content']}</div>",
+            f"<div class='assistant-msg'>{message['content']}<br><small>{message.get('time','')}</small></div>",
             unsafe_allow_html=True
         )
 
@@ -71,12 +75,18 @@ if prompt := st.chat_input("Ask me anything..."):
     if prompt.strip() != "":
 
         # Show user message
+        current_time = get_time()
+        
         st.markdown(
-            f"<div class='user-msg'>{prompt}</div>",
+            f"<div class='user-msg'>{prompt}<br><small>{current_time}</small></div>",
             unsafe_allow_html=True
         )
 
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.session_state.messages.append({
+            "role": "user",
+            "content": prompt,
+            "time": current_time
+        })
 
         prompt_lower = prompt.lower()
 
@@ -113,6 +123,13 @@ if prompt := st.chat_input("Ask me anything..."):
 
         reply = random.choice(default_replies)
 
+        if any(word in prompt_lower for word in ["hi", "hello", "hey"]):
+            reply = random.choice([
+                "Hello! How can I help you today?",
+                "Hi there! What would you like to learn?",
+                "Hey! Ask me anything about CS topics."
+            ])
+
         # Match topic
         matched = False
         clean_prompt = re.sub(r'[^\w\s]', '', prompt_lower)
@@ -133,23 +150,36 @@ if prompt := st.chat_input("Ask me anything..."):
                 reply = random.choice(knowledge["os"])
 
         # ---------------- TYPING EFFECT ---------------- #
+        typing_placeholder = st.empty()
+        typing_placeholder.markdown(
+            "<div class='assistant-msg'>Typing...</div>",
+            unsafe_allow_html=True
+        )
+
         with st.spinner("Thinking..."):
             time.sleep(0.3)
+            
+        typing_placeholder.empty()
 
+        assistant_time = get_time()
         message_placeholder = st.empty()
         full_text = ""
 
         for word in reply.split():
             full_text += word + " "
             message_placeholder.markdown(
-                f"<div class='assistant-msg'>{full_text}▌</div>",
+                f"<div class='assistant-msg'>{full_text}▌<br><small>{assistant_time}</small></div>",
                 unsafe_allow_html=True
             )
             time.sleep(0.04)
 
         message_placeholder.markdown(
-            f"<div class='assistant-msg'>{full_text}</div>",
+            f"<div class='assistant-msg'>{full_text}<br><small>{assistant_time}</small></div>",
             unsafe_allow_html=True
         )
 
-        st.session_state.messages.append({"role": "assistant", "content": reply})
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": reply,
+            "time": assistant_time
+        })
