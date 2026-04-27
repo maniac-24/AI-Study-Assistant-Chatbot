@@ -1,185 +1,155 @@
 import streamlit as st
-import time
-import random
-import re
 from datetime import datetime
+from groq import Groq
+import os
 
+# ================= CONFIG ================= #
+st.set_page_config(page_title="AI Study Assistant", page_icon="🤖")
+
+# ================= API ================= #
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+client = Groq(api_key=GROQ_API_KEY)
+
+# ================= FUNCTIONS ================= #
 def get_time():
     return datetime.now().strftime("%H:%M")
 
-# ---------------- CONFIG ---------------- #
-st.set_page_config(page_title="AI Study Assistant", page_icon="🤖")
+def get_ai_reply(messages):
+    response = client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[
+            {
+                "role": "system",
+                "content": """You are an expert AI Study Assistant.
 
-# ---------------- CUSTOM CSS ---------------- #
+STRICT RULES:
+- Always use proper Markdown formatting
+- Use headings (## Heading)
+- Use bullet points (- item)
+- Add blank lines between sections
+- Keep answers clean and structured
+- Do NOT write long paragraphs
+- Format like ChatGPT
+
+Example:
+
+## What is Python?
+Python is a programming language...
+
+## Key Features
+- Easy to learn
+- High-level
+"""
+            },
+            *messages
+        ]
+    )
+    return response.choices[0].message.content
+
+# ================= CSS ================= #
 st.markdown("""
 <style>
-
-/* User message (right side bubble) */
-.user-msg {
-    text-align: right;
-    background-color: #262730;
-    padding: 10px;
-    border-radius: 12px;
-    margin: 8px 0;
-    max-width: 60%;
-    margin-left: auto;
-}
-
-/* Assistant message (FULL WIDTH) */
-.assistant-msg {
-    text-align: left;
-    background-color: #1c1f26;
-    padding: 14px;
-    border-radius: 12px;
-    margin: 8px auto;
-    width: 100%;
-    max-width: 900px;
-}
-
-/* Remove extra spacing */
 .block-container {
     padding-top: 2rem;
 }
 
+/* USER MESSAGE */
+.user-msg {
+    text-align: right;
+    background-color: #262730;
+    padding: 12px;
+    border-radius: 12px;
+    margin: 10px 0;
+    max-width: 60%;
+    margin-left: auto;
+}
+
+/* BOT MESSAGE */
+.bot-msg {
+    background-color: #1c1f26;
+    padding: 16px;
+    border-radius: 12px;
+    margin: 10px 0;
+    width: 100%;
+    max-width: 900px;
+}
+
+/* TIME */
+.time {
+    font-size: 11px;
+    color: gray;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- TITLE ---------------- #
-st.title("🤖 AI Study Assistant")
-st.markdown("🚀 Your smart AI companion for mastering Python, DSA, OS, and DBMS.")
+# ================= TITLE ================= #
+st.title("AI Study Assistant")
+st.markdown("Your smart AI companion for Python, DSA, OS, DBMS")
 
-# ---------------- CLEAR CHAT ---------------- #
-if st.sidebar.button("🗑 Clear Chat"):
+# ================= CLEAR CHAT ================= #
+if st.sidebar.button("Clear Chat"):
     st.session_state.messages = []
     st.rerun()
 
-# ---------------- SESSION ---------------- #
+# ================= SESSION ================= #
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# ---------------- DISPLAY CHAT ---------------- #
-for message in st.session_state.messages:
-    if message["role"] == "user":
+# ================= DISPLAY CHAT ================= #
+for msg in st.session_state.messages:
+    if msg["role"] == "user":
         st.markdown(
-            f"<div class='user-msg'>{message['content']}<br><small>{message.get('time','')}</small></div>",
+            f"<div class='user-msg'>{msg['content']}<br><span class='time'>{msg['time']}</span></div>",
             unsafe_allow_html=True
         )
     else:
-        st.markdown(
-            f"<div class='assistant-msg'>{message['content']}<br><small>{message.get('time','')}</small></div>",
-            unsafe_allow_html=True
-        )
+        st.markdown("<div class='bot-msg'>", unsafe_allow_html=True)
+        st.markdown(msg["content"])  # Markdown rendering
+        st.markdown(f"<span class='time'>{msg['time']}</span></div>", unsafe_allow_html=True)
 
-# ---------------- USER INPUT ---------------- #
-if prompt := st.chat_input("Ask me anything..."):
-    if prompt.strip() != "":
+# ================= INPUT ================= #
+prompt = st.chat_input("Ask me anything...")
 
-        # Show user message
-        current_time = get_time()
-        
-        st.markdown(
-            f"<div class='user-msg'>{prompt}<br><small>{current_time}</small></div>",
-            unsafe_allow_html=True
-        )
+if prompt:
+    current_time = get_time()
 
-        st.session_state.messages.append({
-            "role": "user",
-            "content": prompt,
-            "time": current_time
-        })
+    # Store user message
+    st.session_state.messages.append({
+        "role": "user",
+        "content": prompt,
+        "time": current_time
+    })
 
-        prompt_lower = prompt.lower()
+    # Show user message
+    st.markdown(
+        f"<div class='user-msg'>{prompt}<br><span class='time'>{current_time}</span></div>",
+        unsafe_allow_html=True
+    )
 
-        # ---------------- SMART KNOWLEDGE ---------------- #
-        knowledge = {
-            "python": [
-                "Python is a powerful language used in AI, web development, and automation.",
-                "Python is beginner-friendly and widely used in data science.",
-                "Python supports multiple programming paradigms like OOP and functional programming."
-            ],
-            "dsa": [
-                "DSA stands for Data Structures and Algorithms, essential for coding interviews.",
-                "DSA helps in writing efficient and optimized programs.",
-                "Learning DSA improves problem-solving skills."
-            ],
-            "os": [
-                "Operating System manages hardware and software resources.",
-                "OS acts as an interface between user and computer hardware.",
-                "Examples include Windows, Linux, and macOS."
-            ],
-            "dbms": [
-                "DBMS is used to store and manage data efficiently.",
-                "It allows users to create, read, update, and delete data.",
-                "Examples include MySQL, PostgreSQL, and MongoDB."
-            ]
-        }
+    # Prepare history
+    chat_history = [
+        {"role": m["role"], "content": m["content"]}
+        for m in st.session_state.messages
+    ]
 
-        # Default replies
-        default_replies = [
-            "I'm your AI Study Assistant. Ask me about Python, DSA, OS, or DBMS.",
-            "Try asking about programming topics like Python or DSA.",
-            "I can help you learn core CS subjects. What would you like to know?"
-        ]
+    # ================= BOT RESPONSE ================= #
+    thinking = st.empty()
+    thinking.markdown("<div class='bot-msg'>Thinking...</div>", unsafe_allow_html=True)
 
-        reply = random.choice(default_replies)
+    reply = get_ai_reply(chat_history)
 
-        if any(word in prompt_lower for word in ["hi", "hello", "hey"]):
-            reply = random.choice([
-                "Hello! How can I help you today?",
-                "Hi there! What would you like to learn?",
-                "Hey! Ask me anything about CS topics."
-            ])
+    thinking.empty()
 
-        # Match topic
-        matched = False
-        clean_prompt = re.sub(r'[^\w\s]', '', prompt_lower)
+    assistant_time = get_time()
 
-        for key, responses in knowledge.items():
-            if re.search(rf"\b{key}\b", clean_prompt):
-                reply = random.choice(responses)
-                matched = True
-                break
+    # Show response
+    st.markdown("<div class='bot-msg'>", unsafe_allow_html=True)
+    st.markdown(reply)
+    st.markdown(f"<span class='time'>{assistant_time}</span></div>", unsafe_allow_html=True)
 
-        # Extra smart keywords
-        if not matched:
-            if any(re.search(rf"\b{word}\b", clean_prompt) for word in ["algorithm", "algorithms", "structure", "structures"]):
-                reply = random.choice(knowledge["dsa"])
-            elif any(re.search(rf"\b{word}\b", clean_prompt) for word in ["database", "sql", "table", "tables"]):
-                reply = random.choice(knowledge["dbms"])
-            elif any(re.search(rf"\b{word}\b", clean_prompt) for word in ["linux", "windows", "kernel"]):
-                reply = random.choice(knowledge["os"])
-
-        # ---------------- TYPING EFFECT ---------------- #
-        typing_placeholder = st.empty()
-        typing_placeholder.markdown(
-            "<div class='assistant-msg'>Typing...</div>",
-            unsafe_allow_html=True
-        )
-
-        with st.spinner("Thinking..."):
-            time.sleep(0.3)
-            
-        typing_placeholder.empty()
-
-        assistant_time = get_time()
-        message_placeholder = st.empty()
-        full_text = ""
-
-        for word in reply.split():
-            full_text += word + " "
-            message_placeholder.markdown(
-                f"<div class='assistant-msg'>{full_text}▌<br><small>{assistant_time}</small></div>",
-                unsafe_allow_html=True
-            )
-            time.sleep(0.04)
-
-        message_placeholder.markdown(
-            f"<div class='assistant-msg'>{full_text}<br><small>{assistant_time}</small></div>",
-            unsafe_allow_html=True
-        )
-
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": reply,
-            "time": assistant_time
-        })
+    # Store response
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": reply,
+        "time": assistant_time
+    })
