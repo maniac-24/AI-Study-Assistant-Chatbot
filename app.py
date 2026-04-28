@@ -2,154 +2,196 @@ import streamlit as st
 from datetime import datetime
 from groq import Groq
 import os
+import tempfile
+
+# RAG imports
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
 
 # ================= CONFIG ================= #
-st.set_page_config(page_title="AI Study Assistant", page_icon="🤖")
+st.set_page_config(page_title="AI Study Assistant", page_icon="🤖", layout="wide")
 
-# ================= API ================= #
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-client = Groq(api_key=GROQ_API_KEY)
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 # ================= FUNCTIONS ================= #
 def get_time():
     return datetime.now().strftime("%H:%M")
 
-def get_ai_reply(messages):
+
+@st.cache_resource(show_spinner=False)
+def build_vector_db(file_bytes: bytes):
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp.write(file_bytes)
+        path = tmp.name
+
+    loader = PyPDFLoader(path)
+    docs = loader.load()
+
+    if not docs:
+        raise ValueError("No readable content in PDF")
+
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    chunks = splitter.split_documents(docs)
+
+    if not chunks:
+        raise ValueError("No chunks created")
+
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
+    return FAISS.from_documents(chunks, embeddings)
+
+
+def get_ai_reply(messages, query, context=None):
+
+    if context:
+        system_prompt = f"""
+You are an AI Study Assistant.
+
+Rules:
+- Use Markdown (## headings, bullet points)
+- Prefer using the provided context
+- If context is relevant → use it
+- If context is NOT enough → use your own knowledge to answer
+
+Context:
+{context}
+"""
+    else:
+        system_prompt = """
+You are an AI Study Assistant.
+
+Rules:
+- Use Markdown (## headings, bullet points)
+- Give clear, structured answers
+"""
+
     response = client.chat.completions.create(
         model="llama-3.1-8b-instant",
         messages=[
-            {
-                "role": "system",
-                "content": """You are an expert AI Study Assistant.
-
-STRICT RULES:
-- Always use proper Markdown formatting
-- Use headings (## Heading)
-- Use bullet points (- item)
-- Add blank lines between sections
-- Keep answers clean and structured
-- Do NOT write long paragraphs
-- Format like ChatGPT
-
-Example:
-
-## What is Python?
-Python is a programming language...
-
-## Key Features
-- Easy to learn
-- High-level
-"""
-            },
-            *messages
+            {"role": "system", "content": system_prompt},
+            *messages,
+            {"role": "user", "content": query}
         ]
     )
+
     return response.choices[0].message.content
 
-# ================= CSS ================= #
-st.markdown("""
-<style>
-.block-container {
-    padding-top: 2rem;
-}
-
-/* USER MESSAGE */
-.user-msg {
-    text-align: right;
-    background-color: #262730;
-    padding: 12px;
-    border-radius: 12px;
-    margin: 10px 0;
-    max-width: 60%;
-    margin-left: auto;
-}
-
-/* BOT MESSAGE */
-.bot-msg {
-    background-color: #1c1f26;
-    padding: 16px;
-    border-radius: 12px;
-    margin: 10px 0;
-    width: 100%;
-    max-width: 900px;
-}
-
-/* TIME */
-.time {
-    font-size: 11px;
-    color: gray;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# ================= TITLE ================= #
-st.title("AI Study Assistant")
-st.markdown("Your smart AI companion for Python, DSA, OS, DBMS")
-
-# ================= CLEAR CHAT ================= #
-if st.sidebar.button("Clear Chat"):
-    st.session_state.messages = []
-    st.rerun()
 
 # ================= SESSION ================= #
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# ================= DISPLAY CHAT ================= #
+if "vector_db" not in st.session_state:
+    st.session_state.vector_db = None
+
+if "upload_trigger" not in st.session_state:
+    st.session_state.upload_trigger = False
+
+
+# ================= HEADER ================= #
+st.markdown("""
+<div style="font-size:18px; font-weight:600;">🤖 AI Study Assistant</div>
+<div style="font-size:12px; color:gray;">Python • DSA • OS • DBMS</div>
+<hr>
+""", unsafe_allow_html=True)
+
+
+# ================= MODE LABEL ================= #
+if st.session_state.vector_db:
+    st.caption("📄 Answering from PDF")
+else:
+    st.caption("🌐 General AI mode")
+
+
+# ================= CHAT DISPLAY ================= #
 for msg in st.session_state.messages:
     if msg["role"] == "user":
         st.markdown(
-            f"<div class='user-msg'>{msg['content']}<br><span class='time'>{msg['time']}</span></div>",
+            f"<div style='text-align:right;background:#262730;padding:10px;border-radius:10px;margin:6px 0;max-width:60%;margin-left:auto'>{msg['content']}<br><span style='font-size:10px;color:gray'>{msg['time']}</span></div>",
             unsafe_allow_html=True
         )
     else:
-        st.markdown("<div class='bot-msg'>", unsafe_allow_html=True)
-        st.markdown(msg["content"])  # Markdown rendering
-        st.markdown(f"<span class='time'>{msg['time']}</span></div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div style='background:#1c1f26;padding:12px;border-radius:10px;margin:6px 0;max-width:900px'>{msg['content']}<br><span style='font-size:10px;color:gray'>{msg['time']}</span></div>",
+            unsafe_allow_html=True
+        )
 
-# ================= INPUT ================= #
-prompt = st.chat_input("Ask me anything...")
 
+# ================= INPUT BAR ================= #
+st.markdown("---")
+
+col1, col2 = st.columns([1, 11])
+
+with col1:
+    if st.button("➕"):
+        st.session_state.upload_trigger = True
+
+with col2:
+    prompt = st.chat_input("Ask anything...")
+
+
+# ================= FILE UPLOAD (CHAT STYLE) ================= #
+if st.session_state.upload_trigger:
+    uploaded_file = st.file_uploader("Upload PDF", type="pdf")
+
+    if uploaded_file:
+        try:
+            st.session_state.vector_db = build_vector_db(uploaded_file.read())
+            st.success("✅ PDF processed successfully")
+            st.session_state.upload_trigger = False
+        except Exception as e:
+            st.error(f"❌ {str(e)}")
+
+
+# ================= REMOVE PDF ================= #
+if st.session_state.vector_db:
+    if st.button("Remove PDF"):
+        st.session_state.vector_db = None
+        st.success("PDF removed")
+
+
+# ================= MESSAGE FLOW ================= #
 if prompt:
     current_time = get_time()
 
-    # Store user message
+    # Save user message
     st.session_state.messages.append({
         "role": "user",
         "content": prompt,
         "time": current_time
     })
 
-    # Show user message
-    st.markdown(
-        f"<div class='user-msg'>{prompt}<br><span class='time'>{current_time}</span></div>",
-        unsafe_allow_html=True
-    )
-
-    # Prepare history
     chat_history = [
         {"role": m["role"], "content": m["content"]}
         for m in st.session_state.messages
     ]
 
-    # ================= BOT RESPONSE ================= #
-    thinking = st.empty()
-    thinking.markdown("<div class='bot-msg'>Thinking...</div>", unsafe_allow_html=True)
+    # ================= RAG LOGIC ================= #
+    if st.session_state.vector_db:
+        docs = st.session_state.vector_db.similarity_search(prompt, k=3)
 
-    reply = get_ai_reply(chat_history)
+        context = "\n\n".join(d.page_content[:500] for d in docs)
 
-    thinking.empty()
+        reply = get_ai_reply(chat_history, prompt, context)
+
+    else:
+        reply = get_ai_reply(chat_history, prompt, None)
 
     assistant_time = get_time()
 
-    # Show response
-    st.markdown("<div class='bot-msg'>", unsafe_allow_html=True)
-    st.markdown(reply)
-    st.markdown(f"<span class='time'>{assistant_time}</span></div>", unsafe_allow_html=True)
-
-    # Store response
+    # Save bot reply
     st.session_state.messages.append({
         "role": "assistant",
         "content": reply,
         "time": assistant_time
     })
+
+    st.rerun()
+
+
+# ================= SIDEBAR ================= #
+if st.sidebar.button("Clear Chat"):
+    st.session_state.messages = []
+    st.rerun()
