@@ -1,10 +1,10 @@
 import streamlit as st
-from datetime import datetime
 from groq import Groq
 import os
 import tempfile
+import time
 
-# RAG imports
+# RAG
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -12,16 +12,21 @@ from langchain_community.vectorstores import FAISS
 
 # ================= CONFIG ================= #
 st.set_page_config(page_title="AI Study Assistant", page_icon="🤖", layout="wide")
-
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# ================= FUNCTIONS ================= #
-def get_time():
-    return datetime.now().strftime("%H:%M")
+# ================= SESSION ================= #
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
+if "vector_db" not in st.session_state:
+    st.session_state.vector_db = None
 
+if "show_upload" not in st.session_state:
+    st.session_state.show_upload = False
+
+# ================= BUILD VECTOR DB ================= #
 @st.cache_resource(show_spinner=False)
-def build_vector_db(file_bytes: bytes):
+def build_vector_db(file_bytes):
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
         tmp.write(file_bytes)
         path = tmp.name
@@ -29,20 +34,16 @@ def build_vector_db(file_bytes: bytes):
     loader = PyPDFLoader(path)
     docs = loader.load()
 
-    if not docs:
-        raise ValueError("No readable content in PDF")
-
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200
+    )
     chunks = splitter.split_documents(docs)
 
-    if not chunks:
-        raise ValueError("No chunks created")
-
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-
     return FAISS.from_documents(chunks, embeddings)
 
-
+# ================= AI ================= #
 def get_ai_reply(messages, query, context=None):
 
     if context:
@@ -50,10 +51,9 @@ def get_ai_reply(messages, query, context=None):
 You are an AI Study Assistant.
 
 Rules:
-- Use Markdown (## headings, bullet points)
-- Prefer using the provided context
-- If context is relevant → use it
-- If context is NOT enough → use your own knowledge to answer
+- Use document as primary source
+- If not found → say "NOT_FOUND"
+- Do not hallucinate
 
 Context:
 {context}
@@ -63,8 +63,8 @@ Context:
 You are an AI Study Assistant.
 
 Rules:
-- Use Markdown (## headings, bullet points)
-- Give clear, structured answers
+- Answer clearly
+- Use structured format
 """
 
     response = client.chat.completions.create(
@@ -78,120 +78,125 @@ Rules:
 
     return response.choices[0].message.content
 
+# ================= STREAM ================= #
+def stream_text(text):
+    placeholder = st.empty()
+    output = ""
 
-# ================= SESSION ================= #
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+    for char in text:
+        output += char
+        placeholder.markdown(output)
+        time.sleep(0.002)
 
-if "vector_db" not in st.session_state:
-    st.session_state.vector_db = None
-
-if "upload_trigger" not in st.session_state:
-    st.session_state.upload_trigger = False
-
+    return output
 
 # ================= HEADER ================= #
 st.markdown("""
-<div style="font-size:18px; font-weight:600;">🤖 AI Study Assistant</div>
-<div style="font-size:12px; color:gray;">Python • DSA • OS • DBMS</div>
+<div style="font-size:18px;font-weight:600;">🤖 AI Study Assistant</div>
+<div style="font-size:12px;color:gray;">Python • DSA • OS • DBMS</div>
 <hr>
 """, unsafe_allow_html=True)
 
-
-# ================= MODE LABEL ================= #
+# ================= MODE ================= #
 if st.session_state.vector_db:
-    st.caption("📄 Answering from PDF")
+    st.caption("📄 PDF Mode (Smart RAG)")
 else:
-    st.caption("🌐 General AI mode")
+    st.caption("🌐 General AI Mode")
 
-
-# ================= CHAT DISPLAY ================= #
+# ================= CHAT ================= #
 for msg in st.session_state.messages:
     if msg["role"] == "user":
         st.markdown(
-            f"<div style='text-align:right;background:#262730;padding:10px;border-radius:10px;margin:6px 0;max-width:60%;margin-left:auto'>{msg['content']}<br><span style='font-size:10px;color:gray'>{msg['time']}</span></div>",
+            f"<div style='text-align:right;background:#262730;padding:10px;border-radius:10px;margin:6px 0;max-width:60%;margin-left:auto'>{msg['content']}</div>",
             unsafe_allow_html=True
         )
     else:
         st.markdown(
-            f"<div style='background:#1c1f26;padding:12px;border-radius:10px;margin:6px 0;max-width:900px'>{msg['content']}<br><span style='font-size:10px;color:gray'>{msg['time']}</span></div>",
+            f"<div style='background:#1c1f26;padding:12px;border-radius:10px;margin:6px 0'>{msg['content']}</div>",
             unsafe_allow_html=True
         )
 
-
-# ================= INPUT BAR ================= #
+# ================= INPUT ================= #
 st.markdown("---")
-
-col1, col2 = st.columns([1, 11])
+col1, col2 = st.columns([1, 10])
 
 with col1:
     if st.button("➕"):
-        st.session_state.upload_trigger = True
+        st.session_state.show_upload = not st.session_state.show_upload
 
 with col2:
-    prompt = st.chat_input("Ask anything...")
+    prompt = st.chat_input("Ask about your PDF...")
 
+# ================= UPLOAD ================= #
+if st.session_state.show_upload:
+    files = st.file_uploader("Upload PDF", type="pdf", accept_multiple_files=True)
 
-# ================= FILE UPLOAD (CHAT STYLE) ================= #
-if st.session_state.upload_trigger:
-    uploaded_file = st.file_uploader("Upload PDF", type="pdf")
-
-    if uploaded_file:
-        try:
-            st.session_state.vector_db = build_vector_db(uploaded_file.read())
-            st.success("✅ PDF processed successfully")
-            st.session_state.upload_trigger = False
-        except Exception as e:
-            st.error(f"❌ {str(e)}")
-
-
-# ================= REMOVE PDF ================= #
-if st.session_state.vector_db:
-    if st.button("Remove PDF"):
+    if files:
         st.session_state.vector_db = None
-        st.success("PDF removed")
 
+        for f in files:
+            db = build_vector_db(f.read())
 
-# ================= MESSAGE FLOW ================= #
+            if st.session_state.vector_db is None:
+                st.session_state.vector_db = db
+            else:
+                st.session_state.vector_db.merge_from(db)
+
+        st.success("PDF Loaded ✅")
+        st.session_state.show_upload = False
+
+# ================= REMOVE ================= #
+if st.session_state.vector_db:
+    if st.button("Remove PDFs"):
+        st.session_state.vector_db = None
+        st.success("Removed")
+
+# ================= MAIN ================= #
 if prompt:
-    current_time = get_time()
 
-    # Save user message
-    st.session_state.messages.append({
-        "role": "user",
-        "content": prompt,
-        "time": current_time
-    })
+    # Add user message
+    st.session_state.messages.append({"role": "user", "content": prompt})
 
     chat_history = [
         {"role": m["role"], "content": m["content"]}
         for m in st.session_state.messages
     ]
 
-    # ================= RAG LOGIC ================= #
+    reply = ""
+
     if st.session_state.vector_db:
-        docs = st.session_state.vector_db.similarity_search(prompt, k=3)
 
-        context = "\n\n".join(d.page_content[:500] for d in docs)
+        # 🔍 Retrieve
+        docs = st.session_state.vector_db.similarity_search(prompt, k=5)
+        context = "\n\n".join(d.page_content for d in docs)
 
-        reply = get_ai_reply(chat_history, prompt, context)
+        if context.strip():
+
+            # STEP 1 → Try document
+            doc_reply = get_ai_reply(chat_history, prompt, context)
+
+            # STEP 2 → fallback detection
+            if "NOT_FOUND" in doc_reply:
+                reply = get_ai_reply(chat_history, prompt, context=None)
+            else:
+                reply = doc_reply
+
+        else:
+            reply = get_ai_reply(chat_history, prompt, context=None)
 
     else:
-        reply = get_ai_reply(chat_history, prompt, None)
+        reply = get_ai_reply(chat_history, prompt, context=None)
 
-    assistant_time = get_time()
+    # ================= OUTPUT ================= #
+    st.markdown("<div style='background:#1c1f26;padding:12px;border-radius:10px'>", unsafe_allow_html=True)
+    final = stream_text(reply)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    # Save bot reply
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": reply,
-        "time": assistant_time
-    })
+    st.session_state.messages.append({"role": "assistant", "content": final})
 
     st.rerun()
 
-
-# ================= SIDEBAR ================= #
+# ================= CLEAR ================= #
 if st.sidebar.button("Clear Chat"):
     st.session_state.messages = []
     st.rerun()
